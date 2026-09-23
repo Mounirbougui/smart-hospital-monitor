@@ -125,7 +125,7 @@ Pharmaceutical products (vaccines, insulin, chemotherapy agents) require strict 
 ### 1. Firmware
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/smart-hospital-monitor.git
+git clone https://github.com/Mounirbougui/smart-hospital-monitor.git
 cd smart-hospital-monitor/firmware
 cp secrets.h.example secrets.h
 ```
@@ -214,8 +214,8 @@ Released under the **MIT License** — see [LICENSE](LICENSE) for details.
 
 **Mounir Bougui**
 
-- GitHub: [@YOUR_USERNAME](https://github.com/YOUR_USERNAME)
-- LinkedIn: [Mounir Bougui](https://linkedin.com/in/YOUR_PROFILE)
+- GitHub: [@Mounirbougui](https://github.com/Mounirbougui)
+- LinkedIn: [Mounir Bougui](https://www.linkedin.com/in/mounir-bougui)
 - Email: bouguimounir875@gmail.com
 
 ---
