@@ -1,0 +1,22 @@
+# Secrets — NEVER commit these
+secrets.h
+**/secrets.h
+*.env
+.env.local
+
+# But allow the example file
+!secrets.h.example
+!**/secrets.h.example
+
+# Arduino
+build/
+*.bin
+*.elf
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
