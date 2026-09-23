@@ -1,0 +1,961 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Smart Hospital Monitor — MedSafe Dashboard</title>
+
+<!-- Chart.js -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<!-- MQTT.js (for live data from HiveMQ) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mqtt/5.0.5/mqtt.min.js"></script>
+
+<style>
+/* ── Design: clinical precision meets urgency readability ── */
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap');
+
+:root {
+  --bg-deep:    #0A0D14;
+  --bg-card:    #111520;
+  --bg-panel:   #161B2A;
+  --border:     #1E2740;
+  --border-hi:  #2D3A5C;
+
+  --green:      #00D68F;
+  --green-dim:  #00A36C;
+  --red:        #FF3D5A;
+  --amber:      #FFB03B;
+  --blue:       #4D9EFF;
+  --purple:     #8B6FFF;
+
+  --text-hi:    #EEF2FF;
+  --text-mid:   #8A95B0;
+  --text-low:   #4A5270;
+
+  --font-ui:    'Space Grotesk', system-ui, sans-serif;
+  --font-mono:  'JetBrains Mono', monospace;
+
+  --radius:     12px;
+  --radius-sm:  6px;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: var(--bg-deep);
+  color: var(--text-hi);
+  font-family: var(--font-ui);
+  min-height: 100vh;
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+/* ── Layout ── */
+.app {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  min-height: 100vh;
+}
+
+header {
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border);
+  padding: 0 2rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 64px;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.logo-icon {
+  width: 36px; height: 36px;
+  background: linear-gradient(135deg, var(--green), var(--blue));
+  border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 18px;
+}
+
+.logo-text { font-size: 1.1rem; font-weight: 600; letter-spacing: -0.02em; }
+.logo-sub  { font-size: 0.75rem; color: var(--text-mid); margin-top: 1px; }
+
+.header-right { display: flex; align-items: center; gap: 1rem; }
+
+.status-pill {
+  display: flex; align-items: center; gap: 6px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 500;
+  border: 1px solid var(--border);
+  background: var(--bg-panel);
+  transition: all 0.3s;
+}
+.status-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--text-low);
+  transition: background 0.3s;
+}
+.status-pill.connected .status-dot { background: var(--green); box-shadow: 0 0 6px var(--green); }
+.status-pill.alert      .status-dot { background: var(--red);   box-shadow: 0 0 6px var(--red);   }
+
+.last-update { font-size: 0.75rem; color: var(--text-mid); font-family: var(--font-mono); }
+
+/* ── Main grid ── */
+main {
+  padding: 1.5rem 2rem 2rem;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr) 280px;
+  grid-template-rows: auto auto 1fr auto;
+  gap: 1rem;
+  max-width: 1600px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+/* ── Alert banner ── */
+.alert-banner {
+  grid-column: 1 / -1;
+  background: linear-gradient(90deg, rgba(255,61,90,0.15) 0%, rgba(255,61,90,0.05) 100%);
+  border: 1px solid rgba(255,61,90,0.4);
+  border-radius: var(--radius-sm);
+  padding: 10px 16px;
+  display: flex; align-items: center; gap: 10px;
+  font-weight: 500;
+  font-size: 0.9rem;
+  display: none;
+}
+.alert-banner.visible { display: flex; }
+.alert-banner .alert-icon { font-size: 1.2rem; }
+
+/* ── Metric cards ── */
+.metric-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.25rem;
+  position: relative;
+  overflow: hidden;
+  transition: border-color 0.3s;
+}
+.metric-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: var(--accent, var(--blue));
+  opacity: 0.7;
+}
+.metric-card.temp  { --accent: var(--amber); }
+.metric-card.hum   { --accent: var(--blue); }
+.metric-card.press { --accent: var(--purple); }
+.metric-card.sos   { --accent: var(--red); }
+.metric-card.alert-active { border-color: var(--red) !important; }
+
+.metric-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-mid);
+  margin-bottom: 0.5rem;
+  display: flex; align-items: center; gap: 6px;
+}
+.metric-label .icon { font-size: 0.9rem; }
+
+.metric-value {
+  font-family: var(--font-mono);
+  font-size: 2.4rem;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--accent, var(--text-hi));
+  letter-spacing: -0.02em;
+}
+.metric-unit { font-size: 1rem; font-weight: 400; color: var(--text-mid); margin-left: 2px; }
+
+.metric-sub {
+  margin-top: 0.5rem;
+  font-size: 0.75rem;
+  color: var(--text-mid);
+}
+
+.metric-status {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  margin-top: 0.5rem;
+}
+.metric-status.ok     { background: rgba(0,214,143,0.12); color: var(--green); }
+.metric-status.warn   { background: rgba(255,176,59,0.12); color: var(--amber); }
+.metric-status.danger { background: rgba(255,61,90,0.12);  color: var(--red); }
+
+/* ── Charts section ── */
+.chart-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.25rem;
+  grid-column: span 2;
+}
+.chart-card.full { grid-column: span 4; }
+
+.chart-header {
+  display: flex; justify-content: space-between; align-items: flex-start;
+  margin-bottom: 1rem;
+}
+.chart-title { font-weight: 600; font-size: 0.92rem; }
+.chart-subtitle { font-size: 0.75rem; color: var(--text-mid); margin-top: 2px; }
+
+.chart-wrapper { position: relative; height: 180px; }
+
+/* ── Side panel ── */
+.side-panel {
+  grid-column: 5;
+  grid-row: 2 / 5;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.panel-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.25rem;
+  flex: 1;
+}
+.panel-title {
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-mid);
+  margin-bottom: 1rem;
+}
+
+/* ── Medication list ── */
+.med-list { display: flex; flex-direction: column; gap: 6px; max-height: 320px; overflow-y: auto; }
+.med-list::-webkit-scrollbar { width: 4px; }
+.med-list::-webkit-scrollbar-track { background: transparent; }
+.med-list::-webkit-scrollbar-thumb { background: var(--border-hi); border-radius: 2px; }
+
+.med-item {
+  display: flex; align-items: flex-start; gap: 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel);
+  border-left: 3px solid transparent;
+  font-size: 0.78rem;
+}
+.med-item.ok      { border-color: var(--green); }
+.med-item.at_risk { border-color: var(--amber); background: rgba(255,176,59,0.06); }
+.med-item.expired { border-color: var(--red);   background: rgba(255,61,90,0.06); }
+.med-item.damaged { border-color: var(--red);   background: rgba(255,61,90,0.08); }
+
+.med-name  { font-weight: 600; color: var(--text-hi); }
+.med-badge {
+  font-size: 0.65rem; font-weight: 700; padding: 2px 6px;
+  border-radius: 3px; text-transform: uppercase; letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+.med-badge.ok      { background: rgba(0,214,143,0.15); color: var(--green); }
+.med-badge.at_risk { background: rgba(255,176,59,0.15); color: var(--amber); }
+.med-badge.expired { background: rgba(255,61,90,0.15);  color: var(--red); }
+.med-badge.damaged { background: rgba(255,61,90,0.2);   color: var(--red); }
+
+.med-reason { color: var(--text-mid); margin-top: 2px; font-size: 0.7rem; }
+
+/* ── Log feed ── */
+.log-feed { display: flex; flex-direction: column; gap: 6px; max-height: 200px; overflow-y: auto; }
+.log-entry {
+  display: flex; gap: 8px; align-items: flex-start;
+  font-size: 0.72rem;
+  font-family: var(--font-mono);
+}
+.log-time { color: var(--text-low); white-space: nowrap; }
+.log-msg  { color: var(--text-mid); }
+.log-msg.info  { color: var(--blue); }
+.log-msg.warn  { color: var(--amber); }
+.log-msg.error { color: var(--red); }
+.log-msg.ok    { color: var(--green); }
+
+/* ── AI Analysis ── */
+.ai-card {
+  grid-column: 1 / 5;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.25rem;
+}
+.ai-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
+
+.ai-analyze-btn {
+  background: linear-gradient(135deg, var(--green), var(--blue));
+  color: #000;
+  border: none;
+  padding: 8px 18px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-ui);
+  font-weight: 700;
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition: opacity 0.2s, transform 0.1s;
+}
+.ai-analyze-btn:hover   { opacity: 0.9; }
+.ai-analyze-btn:active  { transform: scale(0.98); }
+.ai-analyze-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.ai-output {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 1rem;
+  font-size: 0.82rem;
+  line-height: 1.6;
+  color: var(--text-mid);
+  min-height: 80px;
+  white-space: pre-wrap;
+}
+.ai-output .thinking { color: var(--blue); font-style: italic; }
+
+/* ── Summary stats row ── */
+.stats-row {
+  grid-column: 1 / 5;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1rem;
+}
+.stat-mini {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.75rem 1rem;
+  display: flex; align-items: center; gap: 10px;
+}
+.stat-mini-val { font-family: var(--font-mono); font-size: 1.5rem; font-weight: 600; }
+.stat-mini-label { font-size: 0.72rem; color: var(--text-mid); margin-top: 2px; }
+.stat-mini-val.danger { color: var(--red); }
+.stat-mini-val.warn   { color: var(--amber); }
+.stat-mini-val.ok     { color: var(--green); }
+
+/* ── Loading spinner ── */
+.spinner {
+  display: inline-block; width: 12px; height: 12px;
+  border: 2px solid var(--border-hi);
+  border-top-color: var(--green);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Config modal ── */
+.config-btn {
+  background: var(--bg-panel); border: 1px solid var(--border);
+  color: var(--text-mid); padding: 6px 14px;
+  border-radius: var(--radius-sm); font-family: var(--font-ui);
+  font-size: 0.8rem; cursor: pointer; transition: border-color 0.2s;
+}
+.config-btn:hover { border-color: var(--border-hi); color: var(--text-hi); }
+
+.modal-overlay {
+  display: none; position: fixed; inset: 0;
+  background: rgba(0,0,0,0.7); z-index: 200;
+  align-items: center; justify-content: center;
+}
+.modal-overlay.open { display: flex; }
+.modal {
+  background: var(--bg-card); border: 1px solid var(--border-hi);
+  border-radius: var(--radius); padding: 1.5rem;
+  width: min(500px, 90vw); max-height: 90vh; overflow-y: auto;
+}
+.modal h2 { font-size: 1rem; margin-bottom: 1rem; }
+.modal label { display: block; font-size: 0.8rem; color: var(--text-mid); margin-bottom: 4px; margin-top: 12px; }
+.modal input {
+  width: 100%; background: var(--bg-panel); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 8px 10px;
+  color: var(--text-hi); font-family: var(--font-mono); font-size: 0.82rem;
+}
+.modal input:focus { outline: none; border-color: var(--blue); }
+.modal-actions { display: flex; gap: 8px; margin-top: 1.25rem; }
+.btn-primary {
+  background: var(--green); color: #000; border: none;
+  padding: 8px 18px; border-radius: var(--radius-sm);
+  font-weight: 700; font-size: 0.82rem; cursor: pointer; font-family: var(--font-ui);
+}
+.btn-secondary {
+  background: transparent; color: var(--text-mid); border: 1px solid var(--border);
+  padding: 8px 18px; border-radius: var(--radius-sm);
+  font-size: 0.82rem; cursor: pointer; font-family: var(--font-ui);
+}
+
+@media (max-width: 1100px) {
+  main { grid-template-columns: repeat(2, 1fr); }
+  .side-panel { grid-column: span 2; grid-row: auto; }
+  .chart-card.full, .ai-card { grid-column: span 2; }
+  .stats-row { grid-column: span 2; }
+}
+</style>
+</head>
+<body>
+<div class="app">
+
+<!-- ══ HEADER ══ -->
+<header>
+  <div class="logo">
+    <div class="logo-icon">🏥</div>
+    <div>
+      <div class="logo-text">MedSafe Monitor</div>
+      <div class="logo-sub">Smart Hospital Surveillance System</div>
+    </div>
+  </div>
+  <div class="header-right">
+    <span class="last-update" id="lastUpdate">No data yet</span>
+    <div class="status-pill" id="statusPill">
+      <span class="status-dot"></span>
+      <span id="statusText">Connecting…</span>
+    </div>
+    <button class="config-btn" onclick="openConfig()">⚙ Configure</button>
+  </div>
+</header>
+
+<!-- ══ MAIN ══ -->
+<main>
+
+  <!-- Alert banner -->
+  <div class="alert-banner" id="alertBanner">
+    <span class="alert-icon">🚨</span>
+    <span id="alertText">ALERT — Conditions outside safe range!</span>
+  </div>
+
+  <!-- Metric cards (row 2) -->
+  <div class="metric-card temp" id="cardTemp">
+    <div class="metric-label"><span class="icon">🌡</span> Temperature</div>
+    <div class="metric-value" id="valTemp">--<span class="metric-unit">°C</span></div>
+    <div class="metric-status ok" id="stTemp">● Nominal</div>
+    <div class="metric-sub">Safe range: 15 – 33 °C</div>
+  </div>
+
+  <div class="metric-card hum" id="cardHum">
+    <div class="metric-label"><span class="icon">💧</span> Humidity</div>
+    <div class="metric-value" id="valHum">--<span class="metric-unit">%</span></div>
+    <div class="metric-status ok" id="stHum">● Nominal</div>
+    <div class="metric-sub">Safe range: 20 – 70 %</div>
+  </div>
+
+  <div class="metric-card press" id="cardPress">
+    <div class="metric-label"><span class="icon">📊</span> Pressure</div>
+    <div class="metric-value" id="valPress">--<span class="metric-unit">hPa</span></div>
+    <div class="metric-status ok" id="stPress">● Nominal</div>
+    <div class="metric-sub">Reference: ~1013 hPa</div>
+  </div>
+
+  <div class="metric-card sos" id="cardSos">
+    <div class="metric-label"><span class="icon">🆘</span> Emergency</div>
+    <div class="metric-value" id="valSos" style="font-size:1.6rem; margin-top:4px">STANDBY</div>
+    <div class="metric-status ok" id="stSos">● No SOS</div>
+    <div class="metric-sub">Button A (GPIO35) / B (GPIO34)</div>
+  </div>
+
+  <!-- Side panel -->
+  <div class="side-panel">
+
+    <div class="panel-card">
+      <div class="panel-title">Medication Status</div>
+      <div class="med-list" id="medList">
+        <div style="color:var(--text-low); font-size:0.78rem;">Run LLM analysis to populate…</div>
+      </div>
+    </div>
+
+    <div class="panel-card">
+      <div class="panel-title">Live Log</div>
+      <div class="log-feed" id="logFeed"></div>
+    </div>
+
+  </div>
+
+  <!-- Charts -->
+  <div class="chart-card">
+    <div class="chart-header">
+      <div>
+        <div class="chart-title">Temperature History</div>
+        <div class="chart-subtitle">Last 30 readings</div>
+      </div>
+    </div>
+    <div class="chart-wrapper"><canvas id="chartTemp"></canvas></div>
+  </div>
+
+  <div class="chart-card">
+    <div class="chart-header">
+      <div>
+        <div class="chart-title">Humidity History</div>
+        <div class="chart-subtitle">Last 30 readings</div>
+      </div>
+    </div>
+    <div class="chart-wrapper"><canvas id="chartHum"></canvas></div>
+  </div>
+
+  <!-- AI Analysis card -->
+  <div class="ai-card">
+    <div class="ai-header">
+      <div>
+        <div class="chart-title">🤖 AI Medication Quality Analysis</div>
+        <div class="chart-subtitle">LLM evaluates current conditions against medication storage requirements</div>
+      </div>
+      <button class="ai-analyze-btn" id="analyzeBtn" onclick="runAIAnalysis()">
+        ▶ Run Analysis
+      </button>
+    </div>
+    <div class="ai-output" id="aiOutput">
+      <span class="thinking">Waiting for sensor data and analysis trigger…</span>
+    </div>
+  </div>
+
+  <!-- Mini stats -->
+  <div class="stats-row">
+    <div class="stat-mini">
+      <span style="font-size:1.5rem">✅</span>
+      <div>
+        <div class="stat-mini-val ok" id="countOk">--</div>
+        <div class="stat-mini-label">Medications OK</div>
+      </div>
+    </div>
+    <div class="stat-mini">
+      <span style="font-size:1.5rem">⚠️</span>
+      <div>
+        <div class="stat-mini-val warn" id="countRisk">--</div>
+        <div class="stat-mini-label">At Risk</div>
+      </div>
+    </div>
+    <div class="stat-mini">
+      <span style="font-size:1.5rem">❌</span>
+      <div>
+        <div class="stat-mini-val danger" id="countExpired">--</div>
+        <div class="stat-mini-label">Expired</div>
+      </div>
+    </div>
+    <div class="stat-mini">
+      <span style="font-size:1.5rem">🔴</span>
+      <div>
+        <div class="stat-mini-val danger" id="countDamaged">--</div>
+        <div class="stat-mini-label">Damaged</div>
+      </div>
+    </div>
+  </div>
+
+</main>
+</div>
+
+<!-- ══ CONFIG MODAL ══ -->
+<div class="modal-overlay" id="configModal">
+  <div class="modal">
+    <h2>⚙ Connection Settings</h2>
+
+    <label>HiveMQ WebSocket URL (for live dashboard)</label>
+    <input id="cfgMqttWs" placeholder="wss://YOUR_HOST.hivemq.cloud:8884/mqtt" />
+
+    <label>MQTT Username</label>
+    <input id="cfgMqttUser" placeholder="your_username" />
+
+    <label>MQTT Password</label>
+    <input id="cfgMqttPass" type="password" placeholder="your_password" />
+
+    <label>MQTT Topic</label>
+    <input id="cfgTopic" value="hospital/room1/sensors" />
+
+    <label>Groq API Key (for in-browser AI analysis)</label>
+    <input id="cfgApiKey" type="password" placeholder="gsk_..." />
+
+    <div style="font-size:0.72rem; color:var(--amber); margin-top:8px;">
+      ⚠ API key is stored in memory only and sent directly to api.groq.com
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn-primary" onclick="saveConfig()">Connect</button>
+      <button class="btn-secondary" onclick="closeConfig()">Cancel</button>
+      <button class="btn-secondary" onclick="loadDemoData()">📦 Load Demo Data</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════
+//  STATE
+// ═══════════════════════════════════════════════════════════
+const state = {
+  temp: null, humidity: null, pressure: null,
+  alert: false, sos: false,
+  tempHistory: [], humHistory: [], labels: [],
+  mqttClient: null,
+  apiKey: '',
+  medications: []  // loaded from the CSV (embedded below as JS array)
+};
+
+// ── Embedded medication dataset (from medications_dataset.csv) ──
+const MEDICATIONS = [
+  { id:'MED001', name:'Amoxicillin 500mg',    minT:15, maxT:25, minH:20, maxH:60, expiry:'2025-06-30', notes:'Discard if humidity >60% >48h' },
+  { id:'MED002', name:'Insulin Glargine',      minT:2,  maxT:8,  minH:20, maxH:70, expiry:'2024-12-31', notes:'REFRIGERATED — discard if >8°C' },
+  { id:'MED003', name:'Aspirin 100mg',         minT:10, maxT:30, minH:20, maxH:65, expiry:'2026-03-15', notes:'Stable; avoid moisture' },
+  { id:'MED004', name:'Paracetamol 500mg',     minT:15, maxT:30, minH:20, maxH:65, expiry:'2025-09-20', notes:'Store below 30°C' },
+  { id:'MED005', name:'Metformin 850mg',       minT:15, maxT:30, minH:15, maxH:60, expiry:'2025-11-10', notes:'Protect from moisture' },
+  { id:'MED006', name:'Azithromycin 250mg',    minT:15, maxT:30, minH:20, maxH:65, expiry:'2024-08-01', notes:'EXPIRED batch; humidity sensitive' },
+  { id:'MED007', name:'Epinephrine 1mg/mL',   minT:15, maxT:25, minH:20, maxH:60, expiry:'2025-04-30', notes:'Light & heat sensitive' },
+  { id:'MED008', name:'Morphine 10mg',         minT:15, maxT:25, minH:20, maxH:60, expiry:'2025-08-15', notes:'Light sensitive; controlled substance' },
+  { id:'MED009', name:'Omeprazole 20mg',       minT:15, maxT:25, minH:20, maxH:65, expiry:'2026-01-20', notes:'Humidity sensitive; keep sealed' },
+  { id:'MED010', name:'Atorvastatin 40mg',     minT:20, maxT:25, minH:20, maxH:65, expiry:'2025-07-31', notes:'Avoid >25°C' },
+  { id:'MED013', name:'Vancomycin 500mg',      minT:15, maxT:30, minH:20, maxH:60, expiry:'2024-10-15', notes:'EXPIRED' },
+  { id:'MED020', name:'Oxytocin 10IU',         minT:2,  maxT:8,  minH:20, maxH:60, expiry:'2025-01-15', notes:'REFRIGERATED — discard if >8°C' },
+  { id:'MED021', name:'Cisplatin 50mg',        minT:15, maxT:25, minH:20, maxH:60, expiry:'2025-08-30', notes:'Chemo agent; do not refrigerate' },
+  { id:'MED023', name:'Propofol 200mg',        minT:4,  maxT:22, minH:20, maxH:70, expiry:'2025-02-28', notes:'NEAR EXPIRY; refrigerate after opening' },
+  { id:'MED030', name:'Simvastatin 20mg',      minT:15, maxT:30, minH:20, maxH:65, expiry:'2024-11-30', notes:'EXPIRED' },
+];
+
+// ═══════════════════════════════════════════════════════════
+//  CHART SETUP
+// ═══════════════════════════════════════════════════════════
+const chartDefaults = {
+  responsive: true, maintainAspectRatio: false,
+  animation: { duration: 300 },
+  plugins: { legend: { display: false } },
+  scales: {
+    x: { ticks: { color: '#4A5270', maxTicksLimit: 6, font: { family: 'JetBrains Mono', size: 10 } }, grid: { color: '#1E2740' } },
+    y: { ticks: { color: '#4A5270', font: { family: 'JetBrains Mono', size: 10 } }, grid: { color: '#1E2740' } }
+  }
+};
+
+const chartTemp = new Chart(document.getElementById('chartTemp'), {
+  type: 'line',
+  data: { labels: [], datasets: [{ data: [], borderColor: '#FFB03B', backgroundColor: 'rgba(255,176,59,0.08)', borderWidth: 2, tension: 0.4, pointRadius: 3, pointBackgroundColor: '#FFB03B', fill: true }] },
+  options: { ...chartDefaults, scales: { ...chartDefaults.scales, y: { ...chartDefaults.scales.y, suggestedMin: 10, suggestedMax: 40 } } }
+});
+
+const chartHum = new Chart(document.getElementById('chartHum'), {
+  type: 'line',
+  data: { labels: [], datasets: [{ data: [], borderColor: '#4D9EFF', backgroundColor: 'rgba(77,158,255,0.08)', borderWidth: 2, tension: 0.4, pointRadius: 3, pointBackgroundColor: '#4D9EFF', fill: true }] },
+  options: { ...chartDefaults, scales: { ...chartDefaults.scales, y: { ...chartDefaults.scales.y, suggestedMin: 0, suggestedMax: 100 } } }
+});
+
+// ═══════════════════════════════════════════════════════════
+//  DATA INGESTION
+// ═══════════════════════════════════════════════════════════
+function ingestReading(data) {
+  state.temp     = data.temperature;
+  state.humidity = data.humidity;
+  state.pressure = data.pressure;
+  state.alert    = data.alert;
+  state.sos      = data.sos;
+
+  updateMetricCards();
+  updateCharts();
+  addLog(`T=${data.temperature.toFixed(1)}°C H=${data.humidity.toFixed(1)}% P=${data.pressure.toFixed(0)}hPa`, data.alert ? 'warn' : 'ok');
+  document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString();
+}
+
+function updateMetricCards() {
+  const { temp, humidity, pressure, alert, sos } = state;
+
+  // Temperature
+  document.getElementById('valTemp').innerHTML = `${temp.toFixed(1)}<span class="metric-unit">°C</span>`;
+  const tStatus = temp > 33 ? 'danger' : temp < 15 ? 'warn' : 'ok';
+  setStatus('stTemp', tStatus, temp > 33 ? '▲ Too Hot' : temp < 15 ? '▼ Too Cold' : '● Nominal');
+  document.getElementById('cardTemp').classList.toggle('alert-active', tStatus === 'danger');
+
+  // Humidity
+  document.getElementById('valHum').innerHTML = `${humidity.toFixed(1)}<span class="metric-unit">%</span>`;
+  const hStatus = humidity > 75 ? 'danger' : humidity < 20 ? 'warn' : 'ok';
+  setStatus('stHum', hStatus, humidity > 75 ? '▲ Too Humid' : humidity < 20 ? '▼ Too Dry' : '● Nominal');
+
+  // Pressure
+  document.getElementById('valPress').innerHTML = `${pressure.toFixed(0)}<span class="metric-unit">hPa</span>`;
+  const pDiff = Math.abs(pressure - 1013);
+  const pStatus = pDiff > 30 ? 'warn' : 'ok';
+  setStatus('stPress', pStatus, pDiff > 30 ? '⚠ Abnormal' : '● Nominal');
+
+  // SOS
+  const sosEl = document.getElementById('valSos');
+  sosEl.textContent = sos ? '⚠ SOS ACTIVE' : 'STANDBY';
+  sosEl.style.color  = sos ? 'var(--red)' : 'var(--text-hi)';
+  setStatus('stSos', sos ? 'danger' : 'ok', sos ? '🚨 Emergency!' : '● No SOS');
+
+  // Alert banner
+  const banner = document.getElementById('alertBanner');
+  if (alert || sos) {
+    banner.classList.add('visible');
+    document.getElementById('alertText').textContent =
+      sos ? '🚨 SOS BUTTON PRESSED — Emergency Response Required!'
+          : '⚠ Environmental conditions outside safe thresholds — medication at risk!';
+  } else {
+    banner.classList.remove('visible');
+  }
+
+  // Status pill
+  const pill = document.getElementById('statusPill');
+  pill.className = 'status-pill ' + (alert || sos ? 'alert' : 'connected');
+  document.getElementById('statusText').textContent = alert || sos ? 'ALERT' : 'Live';
+}
+
+function setStatus(elId, cls, text) {
+  const el = document.getElementById(elId);
+  el.className = `metric-status ${cls}`;
+  el.textContent = text;
+}
+
+function updateCharts() {
+  const t   = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  const MAX = 30;
+
+  [chartTemp, chartHum].forEach(c => {
+    if (c.data.labels.length >= MAX) { c.data.labels.shift(); c.data.datasets[0].data.shift(); }
+  });
+
+  chartTemp.data.labels.push(t);
+  chartTemp.data.datasets[0].data.push(state.temp);
+  chartTemp.update('none');
+
+  chartHum.data.labels.push(t);
+  chartHum.data.datasets[0].data.push(state.humidity);
+  chartHum.update('none');
+}
+
+// ═══════════════════════════════════════════════════════════
+//  MQTT (WebSocket)
+// ═══════════════════════════════════════════════════════════
+function connectMQTT(url, user, pass, topic) {
+  if (state.mqttClient) state.mqttClient.end(true);
+
+  addLog(`Connecting to MQTT: ${url}`, 'info');
+
+  const client = mqtt.connect(url, { username: user, password: pass, reconnectPeriod: 3000 });
+  state.mqttClient = client;
+
+  client.on('connect', () => {
+    addLog('MQTT connected!', 'ok');
+    document.getElementById('statusPill').className = 'status-pill connected';
+    document.getElementById('statusText').textContent = 'Live';
+    client.subscribe(topic, err => {
+      if (err) addLog('Subscribe failed: ' + err, 'error');
+      else addLog(`Subscribed to ${topic}`, 'ok');
+    });
+  });
+
+  client.on('message', (t, msg) => {
+    try {
+      const data = JSON.parse(msg.toString());
+      ingestReading(data);
+    } catch(e) { addLog('Bad JSON: ' + e.message, 'warn'); }
+  });
+
+  client.on('error', e => { addLog('MQTT error: ' + e.message, 'error'); });
+  client.on('offline', ()  => { addLog('MQTT offline', 'warn'); document.getElementById('statusText').textContent = 'Offline'; });
+}
+
+// ═══════════════════════════════════════════════════════════
+//  AI ANALYSIS (calls Groq API directly from browser)
+// ═══════════════════════════════════════════════════════════
+async function runAIAnalysis() {
+  if (!state.apiKey) { alert('Please add your Groq API key in ⚙ Configure'); return; }
+  if (state.temp === null) { alert('No sensor data yet — wait for MQTT or load demo data'); return; }
+
+  const btn = document.getElementById('analyzeBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Analyzing…';
+
+  const output = document.getElementById('aiOutput');
+  output.innerHTML = '<span class="thinking">🤖 AI is analyzing sensor conditions against medication inventory…</span>';
+
+  const today = new Date().toISOString().split('T')[0];
+
+  const prompt = `You are a pharmaceutical storage quality control AI for a hospital.
+
+CURRENT ROOM CONDITIONS (measured right now):
+- Temperature: ${state.temp.toFixed(2)}°C
+- Humidity: ${state.humidity.toFixed(2)}%
+- Pressure: ${state.pressure.toFixed(2)} hPa
+- Alert active: ${state.alert}
+- SOS emergency: ${state.sos}
+- Date today: ${today}
+
+MEDICATION INVENTORY:
+${MEDICATIONS.map(m =>
+  `[${m.id}] ${m.name} | Expiry: ${m.expiry} | Safe Temp: ${m.minT}–${m.maxT}°C | Safe Humidity: ${m.minH}–${m.maxH}% | Notes: ${m.notes}`
+).join('\n')}
+
+TASK:
+1. Check which medications are EXPIRED (expiry date < today).
+2. Check which are AT_RISK or DAMAGED due to current temperature or humidity being outside their safe range.
+3. List all medications as OK, AT_RISK, EXPIRED, or DAMAGED with a short reason.
+4. Give a concise executive summary for the medical team.
+
+Format your response clearly with sections:
+## Summary
+## Expired Medications
+## Damaged / At-Risk Medications  
+## Safe Medications
+## Recommended Actions`;
+
+  try {
+    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${state.apiKey}`
+      },
+      body: JSON.stringify({
+        model: 'llama-3.1-8b-instant',
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.1,
+        max_tokens: 1500
+      })
+    });
+
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error?.message || `Groq request failed (${res.status})`);
+    if (!data.choices?.[0]?.message?.content) throw new Error('Groq returned an empty response');
+
+    const text = data.choices[0].message.content;
+    output.textContent = text;
+
+    // Parse results to populate medication list
+    parseLLMResponse(text);
+    addLog('AI analysis complete', 'ok');
+
+  } catch(e) {
+    output.innerHTML = `<span style="color:var(--red)">Error: ${e.message}</span>`;
+    addLog('AI error: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '▶ Run Analysis';
+  }
+}
+
+function parseLLMResponse(text) {
+  // Simple heuristic parsing to color-code the medication list
+  const results = MEDICATIONS.map(med => {
+    const tLower = text.toLowerCase();
+    const name = med.name.toLowerCase();
+    const id = med.id.toLowerCase();
+    let status = 'ok';
+
+    const today = new Date();
+    const expiry = new Date(med.expiry);
+    if (expiry < today) status = 'expired';
+
+    if (tLower.includes(med.id + ' — damaged') || tLower.includes(id + ': damaged')) status = 'damaged';
+    else if (tLower.includes(med.id + ' — at_risk') || tLower.includes(id + ': at_risk') || tLower.includes('at risk') && tLower.indexOf(id) > -1) {
+      if (status !== 'expired') status = 'at_risk';
+    }
+
+    // Check conditions directly
+    if (status === 'ok') {
+      if (state.temp > med.maxT || state.temp < med.minT) status = 'at_risk';
+      if (state.humidity > med.maxH || state.humidity < med.minH) status = 'at_risk';
+    }
+
+    return { ...med, status };
+  });
+
+  renderMedList(results);
+
+  const counts = { ok: 0, at_risk: 0, expired: 0, damaged: 0 };
+  results.forEach(r => { counts[r.status] = (counts[r.status] || 0) + 1; });
+  document.getElementById('countOk').textContent      = counts.ok || 0;
+  document.getElementById('countRisk').textContent    = counts.at_risk || 0;
+  document.getElementById('countExpired').textContent = counts.expired || 0;
+  document.getElementById('countDamaged').textContent = counts.damaged || 0;
+}
+
+function renderMedList(results) {
+  const list = document.getElementById('medList');
+  list.innerHTML = '';
+  results.forEach(med => {
+    const div = document.createElement('div');
+    div.className = `med-item ${med.status}`;
+
+    const reason = med.status === 'expired' ? `Expired: ${med.expiry}`
+                 : med.status === 'at_risk' ? `T=${state.temp?.toFixed(1)}°C, H=${state.humidity?.toFixed(1)}%`
+                 : med.status === 'damaged' ? 'Conditions exceeded threshold'
+                 : 'Within safe range';
+
+    div.innerHTML = `
+      <div style="flex:1; min-width:0">
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:4px">
+          <div class="med-name">${med.name}</div>
+          <span class="med-badge ${med.status}">${med.status.replace('_',' ')}</span>
+        </div>
+        <div class="med-reason">${reason}</div>
+      </div>`;
+    list.appendChild(div);
+  });
+}
+
+// ═══════════════════════════════════════════════════════════
+//  LOG FEED
+// ═══════════════════════════════════════════════════════════
+function addLog(msg, type='info') {
+  const feed = document.getElementById('logFeed');
+  const entry = document.createElement('div');
+  entry.className = 'log-entry';
+  const t = new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+  entry.innerHTML = `<span class="log-time">${t}</span><span class="log-msg ${type}">${msg}</span>`;
+  feed.prepend(entry);
+  while (feed.children.length > 50) feed.lastChild.remove();
+}
+
+// ═══════════════════════════════════════════════════════════
+//  CONFIG MODAL
+// ═══════════════════════════════════════════════════════════
+function openConfig()  { document.getElementById('configModal').classList.add('open'); }
+function closeConfig() { document.getElementById('configModal').classList.remove('open'); }
+
+function saveConfig() {
+  const url   = document.getElementById('cfgMqttWs').value.trim();
+  const user  = document.getElementById('cfgMqttUser').value.trim();
+  const pass  = document.getElementById('cfgMqttPass').value;
+  const topic = document.getElementById('cfgTopic').value.trim();
+  state.apiKey = document.getElementById('cfgApiKey').value.trim();
+
+  if (url) connectMQTT(url, user, pass, topic);
+  closeConfig();
+}
+
+// ═══════════════════════════════════════════════════════════
+//  DEMO DATA (when no MQTT available)
+// ═══════════════════════════════════════════════════════════
+function loadDemoData() {
+  closeConfig();
+  addLog('Loading demo data…', 'info');
+
+  // Simulate several readings
+  const demoReadings = [
+    { temperature: 22.4, humidity: 55.2, pressure: 1012.3, alert: false, sos: false },
+    { temperature: 24.1, humidity: 58.0, pressure: 1011.8, alert: false, sos: false },
+    { temperature: 26.7, humidity: 61.5, pressure: 1011.0, alert: false, sos: false },
+    { temperature: 28.9, humidity: 64.3, pressure: 1010.5, alert: true,  sos: false },
+    { temperature: 29.5, humidity: 66.1, pressure: 1010.1, alert: true,  sos: false },
+  ];
+
+  let i = 0;
+  const iv = setInterval(() => {
+    if (i >= demoReadings.length) { clearInterval(iv); addLog('Demo data loaded', 'ok'); return; }
+    ingestReading(demoReadings[i++]);
+  }, 600);
+
+  document.getElementById('statusPill').className = 'status-pill connected';
+  document.getElementById('statusText').textContent = 'Demo';
+}
+
+// ── Init ──
+addLog('Dashboard ready — open ⚙ Configure to connect', 'info');
+</script>
+</body>
+</html>

@@ -1,0 +1,976 @@
+[
+  {
+    "name": "Hospital_Stock_Control",
+    "variables": {},
+    "secrets": {},
+    "nodes": [
+      {
+        "id": "p4aa84dgkfqo6jh9mtr40l3j",
+        "position": {
+          "x": 663.0999126328353,
+          "y": 85.59915517671374
+        },
+        "type": "action",
+        "width": 64,
+        "height": 64,
+        "data": {
+          "name": "postgres-action",
+          "label": "postgres",
+          "inputs": {
+            "input": {
+              "label": "Input"
+            }
+          },
+          "outputs": {
+            "success": {
+              "label": "Success"
+            },
+            "error": {
+              "label": "Error"
+            }
+          },
+          "description": "Execute PostgreSQL operations (select, insert, update, delete)",
+          "showRunningStatus": true,
+          "parameters": {
+            "operation": "Insert",
+            "host": "YOUR_SUPABASE_HOST.pooler.supabase.com",
+            "port": 6543,
+            "user": "postgres.YOUR_PROJECT_ID",
+            "password": "YOUR_SUPABASE_PASSWORD",
+            "database": "postgres",
+            "tableName": "hospital_safety_logs",
+            "insertParams": {
+              "rows": {
+                "device_id": {
+                  "$expr": "output",
+                  "node": "builder",
+                  "outputId": "success",
+                  "path": "device_id"
+                },
+                "temperature": {
+                  "$expr": "output",
+                  "node": "builder",
+                  "outputId": "success",
+                  "path": "temperature"
+                },
+                "humidity": {
+                  "$expr": "output",
+                  "node": "builder",
+                  "outputId": "success",
+                  "path": "humidity"
+                },
+                "pressure": {
+                  "$expr": "output",
+                  "node": "builder",
+                  "outputId": "success",
+                  "path": "pressure"
+                },
+                "ai_verdict": {
+                  "$expr": "output",
+                  "node": "groq",
+                  "outputId": "success",
+                  "path": "ai_verdict"
+                }
+              },
+              "skipOnConflict": false
+            }
+          },
+          "_morphing": false
+        },
+        "selected": true
+      },
+      {
+        "id": "gvync037u8wi1tj8sdbywojk",
+        "position": {
+          "x": 80.43521325239686,
+          "y": 205.99193267117516
+        },
+        "type": "trigger",
+        "width": 64,
+        "height": 64,
+        "data": {
+          "name": "mqtt-trigger",
+          "label": "mqtt",
+          "inputs": {},
+          "outputs": {
+            "success": {
+              "label": "Success"
+            },
+            "error": {
+              "label": "Error"
+            }
+          },
+          "description": "Triggers when messages arrive on MQTT topics",
+          "showRunningStatus": true,
+          "parameters": {
+            "protocol": "mqtts",
+            "qos": "0",
+            "host": "YOUR_MQTT_HOST.hivemq.cloud",
+            "port": 8883,
+            "username": "makerboard_user",
+            "password": "YOUR_MQTT_PASSWORD",
+            "topics": [
+              "hospital/room1/sensors"
+            ],
+            "clientId": "FusionAI_Subscriber"
+          },
+          "_morphing": false
+        },
+        "selected": false
+      },
+      {
+        "id": "k0fvkt7rbvddf5atuxda7dqg",
+        "position": {
+          "x": 379,
+          "y": 160
+        },
+        "type": "action",
+        "width": 64,
+        "height": 64,
+        "data": {
+          "name": "function",
+          "label": "builder",
+          "inputs": {
+            "input": {
+              "label": "Input"
+            }
+          },
+          "outputs": {
+            "success": {
+              "label": "Success"
+            },
+            "error": {
+              "label": "Error"
+            }
+          },
+          "description": "Executes custom JavaScript code on the input data.",
+          "showRunningStatus": true,
+          "parameters": {
+            "code": "// Base64 decoder\nfunction decodeB64(str) {\n  const b64 = \"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=\";\n  let res = \"\", i = 0;\n  str = str.replace(/[^A-Za-z0-9\\+\\/\\=]/g, \"\");\n  while (i < str.length) {\n    const e1 = b64.indexOf(str.charAt(i++));\n    const e2 = b64.indexOf(str.charAt(i++));\n    const e3 = b64.indexOf(str.charAt(i++));\n    const e4 = b64.indexOf(str.charAt(i++));\n    const c1 = (e1 << 2) | (e2 >> 4);\n    const c2 = ((e2 & 15) << 4) | (e3 >> 2);\n    const c3 = ((e3 & 3) << 6) | e4;\n    res += String.fromCharCode(c1);\n    if (e3 !== 64) res += String.fromCharCode(c2);\n    if (e4 !== 64) res += String.fromCharCode(c3);\n  }\n  return res;\n}\n\n// ── MQTT data ──\nconst mqttNode = outputs.mqtt;\nconst mqttMsg =\n  (mqttNode.success && mqttNode.success.message)                                   ? mqttNode.success.message :\n  (mqttNode.success && mqttNode.success.return && mqttNode.success.return.message) ? mqttNode.success.return.message :\n  (mqttNode.message)                                                               ? mqttNode.message :\n  (mqttNode.success && mqttNode.success.return)                                    ? mqttNode.success.return :\n  (mqttNode.success)                                                               ? mqttNode.success :\n  mqttNode;\n\nconst temp     = mqttMsg.temperature;\nconst hum      = mqttMsg.humidity;\nconst press    = mqttMsg.pressure;\nconst alertVal = mqttMsg.alert;\nconst sosVal   = mqttMsg.sos;\nconst deviceId = mqttMsg.device_id;\n\n// ── Drive CSV ──\nconst driveNode = outputs.drive;\nconst driveData =\n  (driveNode.success && driveNode.success.base64)                                    ? driveNode.success.base64 :\n  (driveNode.success && driveNode.success.return && driveNode.success.return.base64) ? driveNode.success.return.base64 :\n  (driveNode.base64)                                                                 ? driveNode.base64 :\n  driveNode.success;\n\nconst csvData = decodeB64(driveData);\n\n// ── Parse CSV ──\n// Columns: medication_id, name, expiry_date, min_temp_c, max_temp_c,\n//          min_hum_pct, max_hum_pct, Pressure\n// Rules:\n//   TEMP  → alert if sensor temp < min_temp OR > max_temp\n//   HUM   → alert if sensor hum  < min_hum  OR > max_hum\n//   PRESS → alert ONLY if sensor pressure > CSV pressure value\n//            (lesser than CSV pressure = no problem)\n//   SOS   → immediate alert if button pressed\nconst lines  = csvData.trim().split('\\n');\nconst issues = [];\n\nfor (let i = 1; i < lines.length; i++) {\n  const row = lines[i].trim();\n  if (!row) continue;\n\n  const cols      = row.split(',');\n  const id        = cols[0].trim();\n  const name      = cols[1].trim();\n  // cols[2] expiry → IGNORED\n  const minTemp   = parseFloat(cols[3]);\n  const maxTemp   = parseFloat(cols[4]);\n  const minHum    = parseFloat(cols[5]);\n  const maxHum    = parseFloat(cols[6]);\n  const csvPress  = parseFloat(cols[7]); // reference max pressure for this med\n\n  const reasons = [];\n\n  // Temperature check\n  if (temp < minTemp) reasons.push(`T=${temp}°C below min ${minTemp}°C`);\n  if (temp > maxTemp) reasons.push(`T=${temp}°C above max ${maxTemp}°C`);\n\n  // Humidity check\n  if (hum < minHum) reasons.push(`H=${hum}% below min ${minHum}%`);\n  if (hum > maxHum) reasons.push(`H=${hum}% above max ${maxHum}%`);\n\n  // Pressure check — ONLY alert if sensor pressure EXCEEDS CSV value\n  if (press > csvPress) reasons.push(`P=${press}hPa exceeds max ${csvPress}hPa`);\n\n  if (reasons.length > 0) {\n    issues.push(`• ${id} ${name}: ${reasons.join(', ')}`);\n  }\n}\n\n// ── SOS — immediate alert regardless of anything else ──\nif (sosVal) {\n  issues.unshift('• 🚨 SOS EMERGENCY BUTTON PRESSED');\n}\n\nconst hasIssues = issues.length > 0;\n\nconst systemPrompt =\n`You are a hospital storage QC assistant.\n\nSENSOR READINGS:\n- Temperature : ${temp}°C\n- Humidity    : ${hum}%\n- Pressure    : ${press} hPa\n- SOS button  : ${sosVal ? \"PRESSED — EMERGENCY\" : \"not pressed\"}\n\nDETECTED ISSUES (pre-computed — report these exactly, do not add or remove anything):\n${hasIssues ? issues.join('\\n') : 'None.'}\n\nINSTRUCTIONS:\n- If no issues: write exactly → All storage conditions normal.\n  then on a new line: STATUS_FLAG = NORMAL\n- If issues exist: write a clean one-sentence summary of the issues listed above only.\n  then on a new line: STATUS_FLAG = SOS\n\nMaximum 40 words. No extra explanation.`;\n\nreturn {\n  systemPrompt: systemPrompt,\n  temperature:  temp,\n  humidity:     hum,\n  pressure:     press,\n  alert:        alertVal,\n  sos:          sosVal,\n  device_id:    deviceId,\n  has_issues:   hasIssues,\n  issues_count: issues.length,\n  issues_list:  issues.join('\\n')\n};"
+          },
+          "_morphing": false
+        },
+        "selected": false
+      },
+      {
+        "id": "g1btwey1w81ac8xsfx13xoxv",
+        "position": {
+          "x": 803.7017520880992,
+          "y": 80.63250545689078
+        },
+        "type": "action",
+        "width": 64,
+        "height": 64,
+        "data": {
+          "name": "function",
+          "label": "formatter",
+          "inputs": {
+            "input": {
+              "label": "Input"
+            }
+          },
+          "outputs": {
+            "success": {
+              "label": "Success"
+            },
+            "error": {
+              "label": "Error"
+            }
+          },
+          "description": "Executes custom JavaScript code on the input data.",
+          "showRunningStatus": true,
+          "parameters": {
+            "code": "// ── 1. Extract Groq verdict ──\nconst groqNode = outputs.groq;\nconst verdict =\n  // NEW FIX: Grab the string directly if it's sitting right inside 'success'\n  (groqNode.success && typeof groqNode.success === 'string')\n    ? groqNode.success :\n  // Fallbacks for other possible JSON structures\n  (groqNode.success && groqNode.success.message)\n    ? groqNode.success.message :\n  (groqNode.success && groqNode.success.return && typeof groqNode.success.return === 'string')\n    ? groqNode.success.return :\n  (groqNode.success && groqNode.success.return && groqNode.success.return.choices)\n    ? groqNode.success.return.choices[0].message.content :\n  (groqNode.success && groqNode.success.choices && groqNode.success.choices[0])\n    ? groqNode.success.choices[0].message.content :\n  (groqNode.success && groqNode.success.content)\n    ? groqNode.success.content :\n  \"unavailable\";\n\n// ── 2. Extract builder data ──\nconst builderNode = outputs.builder;\nconst builderData =\n  (builderNode.success && builderNode.success.return) ? builderNode.success.return :\n  (builderNode.success)                               ? builderNode.success :\n  builderNode;\n\nconst now = new Date().toISOString();\n\n// ── 3. Return values array for Google Sheets ──\nreturn {\n  values: [\n    now,\n    builderData.device_id   || 'MakerBoard_01',\n    builderData.temperature || 0,\n    builderData.humidity    || 0,\n    builderData.pressure    || 0,\n    builderData.alert       || false,\n    builderData.sos         || false,\n    verdict\n  ]\n};"
+          },
+          "_morphing": false
+        },
+        "selected": false
+      },
+      {
+        "id": "jm3i0j3rdg4ovt5v8468v7xp",
+        "position": {
+          "x": 678.810620891853,
+          "y": 295.3983812914288
+        },
+        "type": "action",
+        "width": 64,
+        "height": 64,
+        "data": {
+          "name": "function",
+          "label": "condition_extract",
+          "inputs": {
+            "input": {
+              "label": "Input"
+            }
+          },
+          "outputs": {
+            "success": {
+              "label": "Success"
+            },
+            "error": {
+              "label": "Error"
+            }
+          },
+          "description": "Executes custom JavaScript code on the input data.",
+          "showRunningStatus": true,
+          "parameters": {
+            "code": "// Grab the text output from Groq\nconst groqNode = outputs.groq;\nconst verdictText = \n  (groqNode.success && groqNode.success.message) ? groqNode.success.message :\n  (groqNode.success && groqNode.success.return && groqNode.success.return.message) ? groqNode.success.return.message :\n  (groqNode.message) ? groqNode.message : \n  groqNode.success || groqNode;\n\n// 1. Check if the AI explicitly flagged an SOS in the text\nconst aiWantsSos = typeof verdictText === 'string' && verdictText.includes(\"STATUS_FLAG = SOS\");\n\n// 2. Check if the hardware button was physically pressed (from the builder node data)\nconst builderNode = outputs.builder || {};\nconst hardwareSos = (builderNode.sos === true) || (builderNode.alert === true);\n\n// 3. FORCE ALERT IF EITHER CONDITION IS TRUE\n// This guarantees that pressing the physical button ALWAYS triggers an alert, \n// even if the AI text gets cut off!\nconst hasIssue = aiWantsSos || hardwareSos;\n\nreturn {\n  hasIssue: hasIssue,\n  verdictText: verdictText\n};"
+          },
+          "_morphing": false
+        },
+        "selected": false
+      },
+      {
+        "id": "x0ndq1ct8tsjetuoc57lajde",
+        "position": {
+          "x": 1159.4286409840656,
+          "y": 55.963632305065346
+        },
+        "type": "action",
+        "width": 64,
+        "height": 64,
+        "data": {
+          "name": "function",
+          "label": "Format_Alert",
+          "inputs": {
+            "input": {
+              "label": "Input"
+            }
+          },
+          "outputs": {
+            "success": {
+              "label": "Success"
+            },
+            "error": {
+              "label": "Error"
+            }
+          },
+          "description": "Executes custom JavaScript code on the input data.",
+          "showRunningStatus": true,
+          "parameters": {
+            "code": "// ── Extract FRESH builder data (current run only) ──\nconst builderNode = outputs.builder;\nconst builderData =\n  (builderNode.success && builderNode.success.return) ? builderNode.success.return :\n  (builderNode.success)                               ? builderNode.success :\n  builderNode;\n\nconst devId = builderData.device_id   || 'MakerBoard_01';\nconst temp  = builderData.temperature || 0;\nconst hum   = builderData.humidity    || 0;\nconst press = builderData.pressure    || 0;\nconst sos   = builderData.sos         || false;\n\n// ── Extract Groq verdict (UPDATED FIX WITH CORRECT NAME) ──\nconst groqNode = outputs.groq;\nconst verdict = \n  (groqNode.success && typeof groqNode.success === 'string') \n    ? groqNode.success :\n  (groqNode.success && groqNode.success.message) \n    ? groqNode.success.message :\n  (groqNode.success && groqNode.success.return && typeof groqNode.success.return === 'string') \n    ? groqNode.success.return :\n  (groqNode.success && groqNode.success.return && groqNode.success.return.choices) \n    ? groqNode.success.return.choices[0].message.content :\n  \"unavailable\";\n\nconst today = new Date().toISOString().split('T')[0];\n\nconst bodyText =\n`CRITICAL STORAGE ALERT DETECTED\n======================================\nDevice ID   : ${devId}\nDate        : ${today}\nTemperature : ${temp} °C\nHumidity    : ${hum} %\nPressure    : ${press} hPa\nSOS Trigger : ${sos ? \"YES 🚨\" : \"NO\"}\n\nAI PHARMACEUTICAL ASSESSMENT:\n${verdict}\n\nAction Required: Inspect storage room immediately.`;\n\nreturn {\n  body:          bodyText,\n  subject:       `🚨 HOSPITAL ALERT — ${devId} — ${today}`,\n  documentTitle: `Incident_Report_${devId}_${today}`,\n  verdict:       verdict,\n  temperature:   temp,\n  humidity:      hum,\n  pressure:      press,\n  device_id:     devId,\n  sos:           sos\n};"
+          },
+          "_morphing": false
+        },
+        "selected": false
+      },
+      {
+        "id": "fb0xo75yc9mklmgdjr587cz8",
+        "position": {
+          "x": 1396.2134106674835,
+          "y": 241.04377501191703
+        },
+        "type": "action",
+        "width": 64,
+        "height": 64,
+        "data": {
+          "name": "function",
+          "label": "Gmail_text",
+          "inputs": {
+            "input": {
+              "label": "Input"
+            }
+          },
+          "outputs": {
+            "success": {
+              "label": "Success"
+            },
+            "error": {
+              "label": "Error"
+            }
+          },
+          "description": "Executes custom JavaScript code on the input data.",
+          "showRunningStatus": true,
+          "parameters": {
+            "code": "// ── 1. Extract Alert Data (from Format_Alert) ──\nconst fa = outputs.Format_Alert;\nconst faData =\n  (fa.success && fa.success.return) ? fa.success.return :\n  (fa.success)                      ? fa.success :\n  fa;\n\nconst devId   = faData.device_id   || 'MakerBoard_01';\nconst temp    = faData.temperature || 'N/A';\nconst hum     = faData.humidity    || 'N/A';\nconst press   = faData.pressure    || 'N/A';\nconst sos     = faData.sos         || false;\nconst verdict = faData.verdict     || 'Assessment unavailable';\nconst subject = faData.subject     || `🚨 HOSPITAL ALERT — ${devId}`;\nconst today   = new Date().toISOString().replace('T', ' ').split('.')[0];\n\n// ── 2. Extract Document ID (from Create node) ──\nconst createNode = outputs.Create;\nconst docId = (createNode && createNode.success && createNode.success.documentId) \n  ? createNode.success.documentId \n  : '';\n// If we have an ID, make the link. Otherwise fallback to '#'\nconst docLink = docId ? `https://docs.google.com/document/d/${docId}/edit` : '#';\n\n// ── 3. Build HTML using your French template style ──\nconst htmlContent = `\n    <div style=\"font-family:Arial,sans-serif;max-width:600px;margin:auto;background:#f4f4f4;padding:20px;\">\n      <div style=\"background:#e74c3c;padding:20px;border-radius:8px 8px 0 0;text-align:center;\">\n        <h2 style=\"color:#fff;margin:0;\">🚨 Alerte Critique de Stockage</h2>\n      </div>\n      <div style=\"background:#fff;padding:24px;border-radius:0 0 8px 8px;\">\n        <p style=\"color:#333;\">Bonjour,</p>\n        <p style=\"color:#555;\">Une anomalie a été détectée dans la salle de stockage pharmaceutique. Une intervention immédiate est requise.</p>\n        \n        <table style=\"width:100%;border-collapse:collapse;margin:16px 0;\">\n          <tr style=\"background:#f8f9fa;\">\n            <td style=\"padding:10px;font-weight:bold;color:#333;\">📡 Appareil</td>\n            <td style=\"padding:10px;color:#555;\">${devId}</td>\n          </tr>\n          <tr>\n            <td style=\"padding:10px;font-weight:bold;color:#333;\">🕐 Date</td>\n            <td style=\"padding:10px;color:#555;\">${today}</td>\n          </tr>\n          <tr style=\"background:#f8f9fa;\">\n            <td style=\"padding:10px;font-weight:bold;color:#333;\">🌡️ Température</td>\n            <td style=\"padding:10px;color:#555;\">${temp} °C</td>\n          </tr>\n          <tr>\n            <td style=\"padding:10px;font-weight:bold;color:#333;\">💧 Humidité</td>\n            <td style=\"padding:10px;color:#555;\">${hum} %</td>\n          </tr>\n          <tr style=\"background:#f8f9fa;\">\n            <td style=\"padding:10px;font-weight:bold;color:#333;\">📊 Pression</td>\n            <td style=\"padding:10px;color:#555;\">${press} hPa</td>\n          </tr>\n          <tr>\n            <td style=\"padding:10px;font-weight:bold;color:#333;\">⚠️ Déclencheur SOS</td>\n            <td style=\"padding:10px;font-weight:bold;color:${sos ? '#d93025' : '#188038'};\">\n              ${sos ? '🔴 ACTIF' : '🟢 NORMAL'}\n            </td>\n          </tr>\n          <tr style=\"background:#f8f9fa;\">\n            <td style=\"padding:10px;font-weight:bold;color:#333;\">🤖 Évaluation IA</td>\n            <td style=\"padding:10px;color:#555;\">${verdict.replace(/\\n/g, '<br>')}</td>\n          </tr>\n        </table>\n        \n        <div style=\"text-align:center;margin:24px 0;\">\n          <a href=\"${docLink}\"\n             style=\"background:#1a73e8;color:#fff;padding:14px 32px;border-radius:6px;text-decoration:none;font-size:15px;display:inline-block;\">\n            📄 Ouvrir le Rapport (Google Doc)\n          </a>\n        </div>\n        \n        <p style=\"color:#aaa;font-size:11px;text-align:center;\">\n          Généré automatiquement — Smart Hospital Monitor\n        </p>\n      </div>\n    </div>\n`;\n\n// ── 4. Return block mapped perfectly for your Gmail Node ──\nreturn {\n  to: [\"bouguimounir875@gmail.com\"], // Added just like your previous working code\n  subject: subject,\n  html: htmlContent\n};"
+          },
+          "_morphing": false
+        },
+        "selected": false
+      },
+      {
+        "id": "a17ak2xlcte90i0zl14j6bf5",
+        "position": {
+          "x": 1511.6614593533889,
+          "y": -98.55208426144507
+        },
+        "type": "action",
+        "width": 64,
+        "height": 64,
+        "data": {
+          "name": "function",
+          "label": "Docs_Formatter",
+          "inputs": {
+            "input": {
+              "label": "Input"
+            }
+          },
+          "outputs": {
+            "success": {
+              "label": "Success"
+            },
+            "error": {
+              "label": "Error"
+            }
+          },
+          "description": "Executes custom JavaScript code on the input data.",
+          "showRunningStatus": true,
+          "parameters": {
+            "code": "// Grab the body text from Format_Alert node\nconst docContent =\n  (outputs.Format_Alert && outputs.Format_Alert.success && outputs.Format_Alert.success.return && outputs.Format_Alert.success.return.body)\n    ? outputs.Format_Alert.success.return.body :\n  (outputs.Format_Alert && outputs.Format_Alert.success && outputs.Format_Alert.success.body)\n    ? outputs.Format_Alert.success.body :\n  (outputs.Format_Alert && outputs.Format_Alert.body)\n    ? outputs.Format_Alert.body :\n  \"Error: Alert text not found\";\n\nconst requests = JSON.stringify([\n  {\n    insertText: {\n      location: { index: 1 },\n      text: docContent\n    }\n  }\n]);\n\nreturn { requests: requests };"
+          },
+          "_morphing": false
+        },
+        "selected": false
+      },
+      {
+        "id": "e44khz3hod8qjohxcqe9h0qe",
+        "position": {
+          "x": 1368.0553711519146,
+          "y": -55.68981203771308
+        },
+        "type": "action",
+        "width": 64,
+        "height": 64,
+        "data": {
+          "name": "google-docs",
+          "label": "Create",
+          "inputs": {
+            "input": {
+              "label": "Input"
+            }
+          },
+          "outputs": {
+            "success": {
+              "label": "Success"
+            },
+            "error": {
+              "label": "Error"
+            }
+          },
+          "description": "Create, read, and update Google Docs documents. Manage document content and formatting.",
+          "showRunningStatus": true,
+          "parameters": {
+            "operation": "createDocument",
+            "documentTitle": {
+              "$expr": "output",
+              "node": "Format_Alert",
+              "outputId": "success",
+              "path": "documentTitle"
+            },
+            "clientId": "YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com",
+            "clientSecret": "YOUR_GOOGLE_CLIENT_SECRET",
+            "refreshToken": "YOUR_GOOGLE_REFRESH_TOKEN"
+          },
+          "_morphing": false
+        },
+        "selected": false
+      },
+      {
+        "id": "ujr360jxlhn780aqtibiz038",
+        "position": {
+          "x": 1641.645403193451,
+          "y": -134.45567165255272
+        },
+        "type": "action",
+        "width": 64,
+        "height": 64,
+        "data": {
+          "name": "google-docs",
+          "label": "Insert Content",
+          "inputs": {
+            "input": {
+              "label": "Input"
+            }
+          },
+          "outputs": {
+            "success": {
+              "label": "Success"
+            },
+            "error": {
+              "label": "Error"
+            }
+          },
+          "description": "Create, read, and update Google Docs documents. Manage document content and formatting.",
+          "showRunningStatus": true,
+          "parameters": {
+            "operation": "batchUpdateDocument",
+            "clientId": "YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com",
+            "clientSecret": "YOUR_GOOGLE_CLIENT_SECRET",
+            "refreshToken": "YOUR_GOOGLE_REFRESH_TOKEN",
+            "documentId": {
+              "$expr": "output",
+              "node": "Create",
+              "outputId": "success",
+              "path": "documentId"
+            },
+            "batchUpdateRequests": {
+              "$expr": "output",
+              "node": "Docs_Formatter",
+              "outputId": "success",
+              "path": "requests"
+            }
+          },
+          "_morphing": false
+        },
+        "selected": false
+      },
+      {
+        "id": "osk7hxbajhsqgvcing60lswl",
+        "position": {
+          "x": 939.0765290170972,
+          "y": 53.3679371947551
+        },
+        "type": "action",
+        "width": 64,
+        "height": 64,
+        "data": {
+          "name": "google-sheets-values",
+          "label": "Google Sheets - Values",
+          "inputs": {
+            "input": {
+              "label": "Input"
+            }
+          },
+          "outputs": {
+            "success": {
+              "label": "Success"
+            },
+            "error": {
+              "label": "Error"
+            }
+          },
+          "description": "Value operations for Google Sheets (append/update/get)",
+          "showRunningStatus": true,
+          "parameters": {
+            "operation": "append",
+            "clientId": "YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com",
+            "clientSecret": "YOUR_GOOGLE_CLIENT_SECRET",
+            "refreshToken": "YOUR_GOOGLE_REFRESH_TOKEN",
+            "spreadsheetId": "YOUR_SPREADSHEET_ID",
+            "range": "A:F",
+            "values": {
+              "$expr": "output",
+              "node": "formatter",
+              "outputId": "success",
+              "path": "values"
+            }
+          },
+          "_morphing": false
+        },
+        "selected": false
+      },
+      {
+        "id": "xpba4512x4iqlwk637ykkdfx",
+        "position": {
+          "x": 1635.3507330867153,
+          "y": 79.53403157969416
+        },
+        "type": "action",
+        "width": 64,
+        "height": 64,
+        "data": {
+          "name": "slack-action",
+          "label": "Slack Action",
+          "inputs": {
+            "input": {
+              "label": "Input"
+            }
+          },
+          "outputs": {
+            "success": {
+              "label": "Success"
+            },
+            "error": {
+              "label": "Error"
+            }
+          },
+          "description": "Perform Slack operations",
+          "showRunningStatus": true,
+          "parameters": {
+            "operation": "message",
+            "token": "YOUR_SLACK_BOT_TOKEN",
+            "messageOperation": "send",
+            "messageChannelId": "#all-projet-5",
+            "text": {
+              "$expr": "output",
+              "node": "Format_Alert",
+              "outputId": "success",
+              "path": "body"
+            }
+          },
+          "_morphing": false
+        },
+        "selected": false
+      },
+      {
+        "id": "gh106r9g6tdflpcss845g5w5",
+        "position": {
+          "x": 1631.813631614221,
+          "y": 253.47137490180083
+        },
+        "type": "action",
+        "width": 64,
+        "height": 64,
+        "data": {
+          "name": "gmail",
+          "label": "Gmail",
+          "inputs": {
+            "input": {
+              "label": "Input"
+            }
+          },
+          "outputs": {
+            "success": {
+              "label": "Success"
+            },
+            "error": {
+              "label": "Error"
+            }
+          },
+          "description": "Consolidated Gmail operations (send/get/trash/delete/move/markRead/markUnread/createLabel/listLabels)",
+          "showRunningStatus": true,
+          "parameters": {
+            "operation": "send",
+            "clientId": "YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com",
+            "clientSecret": "YOUR_GOOGLE_CLIENT_SECRET",
+            "refreshToken": "YOUR_GOOGLE_REFRESH_TOKEN",
+            "bodyType": "html",
+            "to": [
+              "bouguimounir875@gmail.com"
+            ],
+            "html": {
+              "$expr": "output",
+              "node": "Gmail_text",
+              "outputId": "success",
+              "path": "html"
+            },
+            "subject": {
+              "$expr": "output",
+              "node": "Gmail_text",
+              "outputId": "success",
+              "path": "subject"
+            }
+          },
+          "_morphing": false
+        },
+        "selected": false
+      },
+      {
+        "id": "iy8eec0479a8tit8uxykjx24",
+        "position": {
+          "x": 867.1824816894474,
+          "y": 344.52881541176134
+        },
+        "type": "utility",
+        "width": 64,
+        "height": 68,
+        "data": {
+          "name": "if-else",
+          "label": "If-Else",
+          "inputs": {
+            "input": {
+              "label": "Input"
+            }
+          },
+          "outputs": {
+            "true": {
+              "label": "True"
+            },
+            "false": {
+              "label": "False"
+            },
+            "error": {
+              "label": "Error"
+            }
+          },
+          "description": "Executes different branches based on a condition",
+          "showRunningStatus": false,
+          "parameters": {
+            "condition": "input.hasIssue === true"
+          },
+          "_morphing": false
+        },
+        "selected": false
+      },
+      {
+        "id": "wpl1ilmd20o6j4owghf9xvix",
+        "position": {
+          "x": 237.87293622685416,
+          "y": 202.61401201875233
+        },
+        "type": "action",
+        "width": 64,
+        "height": 64,
+        "data": {
+          "name": "google-drive-file",
+          "label": "drive",
+          "inputs": {
+            "input": {
+              "label": "Input"
+            }
+          },
+          "outputs": {
+            "success": {
+              "label": "Success"
+            },
+            "error": {
+              "label": "Error"
+            }
+          },
+          "description": "File operations for Google Drive (upload/download/delete/update)",
+          "showRunningStatus": true,
+          "parameters": {
+            "operation": "download",
+            "clientId": "YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com",
+            "clientSecret": "YOUR_GOOGLE_CLIENT_SECRET",
+            "refreshToken": "YOUR_GOOGLE_REFRESH_TOKEN",
+            "fileId": "YOUR_MEDICATIONS_CSV_FILE_ID"
+          },
+          "_morphing": false
+        },
+        "selected": false
+      },
+      {
+        "id": "smsr85ngoc1gevtefin6dyii",
+        "position": {
+          "x": 532.1427886071269,
+          "y": 112.24982206934939
+        },
+        "type": "agent-llm",
+        "width": 64,
+        "height": 64,
+        "data": {
+          "name": "groq-llm",
+          "label": "groq",
+          "inputs": {
+            "input": {
+              "label": "Input"
+            }
+          },
+          "outputs": {
+            "success": {
+              "label": "Success"
+            },
+            "error": {
+              "label": "Error"
+            }
+          },
+          "description": "A node that uses Groq's ultra-fast LLM inference.",
+          "showRunningStatus": true,
+          "parameters": {
+            "apiKey": "YOUR_GROQ_API_KEY",
+            "systemPrompt": {
+              "$expr": "output",
+              "node": "builder",
+              "outputId": "success",
+              "path": "return.systemPrompt"
+            },
+            "maxTokens": 1024,
+            "temperature": 0.1,
+            "model": "llama-3.3-70b-versatile",
+            "maxRetries": 0
+          },
+          "_morphing": false
+        },
+        "selected": false
+      },
+      {
+        "id": "kcthfvrr207w3aicumomfz7c",
+        "position": {
+          "x": 1391.108670501902,
+          "y": 111.14084469813355
+        },
+        "type": "action",
+        "width": 64,
+        "height": 64,
+        "data": {
+          "name": "function",
+          "label": "Slack_text",
+          "inputs": {
+            "input": {
+              "label": "Input"
+            }
+          },
+          "outputs": {
+            "success": {
+              "label": "Success"
+            },
+            "error": {
+              "label": "Error"
+            }
+          },
+          "description": "Executes custom JavaScript code on the input data.",
+          "showRunningStatus": true,
+          "parameters": {
+            "code": "// ── Read everything from Format_Alert (single source of truth) ──\nconst fa = outputs.Format_Alert;\nconst faData =\n  (fa.success && fa.success.return) ? fa.success.return :\n  (fa.success)                      ? fa.success :\n  fa;\n\nconst devId   = faData.device_id   || 'MakerBoard_01';\nconst temp    = faData.temperature || 0;\nconst hum     = faData.humidity    || 0;\nconst press   = faData.pressure    || 0;\nconst sos     = faData.sos         || false;\nconst verdict = faData.verdict     || 'Assessment unavailable';\nconst today   = new Date().toISOString().replace('T', ' ').split('.')[0];\n\nconst tempOk   = temp >= 15 && temp <= 33;\nconst humOk    = hum  >= 20 && hum  <= 80;\nconst tempIcon = tempOk ? \"✅\" : \"🔴\";\nconst humIcon  = humOk  ? \"✅\" : \"🔴\";\n\nconst slackMessage =\n`:rotating_light: *CRITICAL HOSPITAL STORAGE ALERT* :rotating_light:\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n*Device:* \\`${devId}\\`\n*Time:* ${today}\n\n*📡 LIVE SENSOR READINGS*\n${tempIcon} *Temperature:* ${temp} °C  _(safe: 15–33°C)_\n${humIcon} *Humidity:* ${hum} %  _(safe: 20–80%)_\n📊 *Pressure:* ${press} hPa  _(ref: ~1013 hPa)_\n${sos ? \"🚨\" : \"✅\"} *SOS Button:* ${sos ? \"PRESSED — EMERGENCY\" : \"Not pressed\"}\n\n*🤖 AI PHARMACEUTICAL ASSESSMENT*\n${verdict}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n⚠️ *Action Required:* Inspect storage room immediately.\n_Smart Hospital Monitor — MakerBoard IoT System_`;\n\nreturn { slackMessage: slackMessage };"
+          },
+          "_morphing": false
+        },
+        "selected": false
+      }
+    ],
+    "connections": [
+      {
+        "source": "g1btwey1w81ac8xsfx13xoxv",
+        "sourceHandle": "success",
+        "target": "osk7hxbajhsqgvcing60lswl",
+        "targetHandle": "input",
+        "type": "directed",
+        "id": "xy-edge__g1btwey1w81ac8xsfx13xoxvsuccess-osk7hxbajhsqgvcing60lswlinput",
+        "data": {
+          "isAnimated": false
+        }
+      },
+      {
+        "source": "p4aa84dgkfqo6jh9mtr40l3j",
+        "sourceHandle": "success",
+        "target": "g1btwey1w81ac8xsfx13xoxv",
+        "targetHandle": "input",
+        "type": "directed",
+        "id": "xy-edge__p4aa84dgkfqo6jh9mtr40l3jsuccess-g1btwey1w81ac8xsfx13xoxvinput",
+        "data": {
+          "isAnimated": false
+        }
+      },
+      {
+        "source": "iy8eec0479a8tit8uxykjx24",
+        "sourceHandle": "true",
+        "target": "x0ndq1ct8tsjetuoc57lajde",
+        "targetHandle": "input",
+        "type": "directed",
+        "id": "xy-edge__iy8eec0479a8tit8uxykjx24true-x0ndq1ct8tsjetuoc57lajdeinput",
+        "data": {
+          "isAnimated": false
+        }
+      },
+      {
+        "source": "x0ndq1ct8tsjetuoc57lajde",
+        "sourceHandle": "success",
+        "target": "e44khz3hod8qjohxcqe9h0qe",
+        "targetHandle": "input",
+        "type": "directed",
+        "id": "xy-edge__x0ndq1ct8tsjetuoc57lajdesuccess-e44khz3hod8qjohxcqe9h0qeinput",
+        "data": {
+          "isAnimated": false
+        }
+      },
+      {
+        "source": "el3paq74364jizappu1h5omv",
+        "sourceHandle": "success",
+        "target": "p4aa84dgkfqo6jh9mtr40l3j",
+        "targetHandle": "input",
+        "type": "directed",
+        "id": "xy-edge__el3paq74364jizappu1h5omvsuccess-p4aa84dgkfqo6jh9mtr40l3jinput",
+        "data": {
+          "isAnimated": false
+        }
+      },
+      {
+        "source": "gvync037u8wi1tj8sdbywojk",
+        "sourceHandle": "success",
+        "target": "ac58t3wd7xkbv4d1tvja1dqw",
+        "targetHandle": "input",
+        "type": "directed",
+        "id": "xy-edge__gvync037u8wi1tj8sdbywojksuccess-ac58t3wd7xkbv4d1tvja1dqwinput",
+        "data": {
+          "isAnimated": false
+        }
+      },
+      {
+        "source": "wpl1ilmd20o6j4owghf9xvix",
+        "sourceHandle": "success",
+        "target": "k0fvkt7rbvddf5atuxda7dqg",
+        "targetHandle": "input",
+        "type": "directed",
+        "id": "xy-edge__wpl1ilmd20o6j4owghf9xvixsuccess-k0fvkt7rbvddf5atuxda7dqginput",
+        "data": {
+          "isAnimated": false
+        }
+      },
+      {
+        "source": "gvync037u8wi1tj8sdbywojk",
+        "sourceHandle": "success",
+        "target": "wpl1ilmd20o6j4owghf9xvix",
+        "targetHandle": "input",
+        "type": "directed",
+        "id": "xy-edge__gvync037u8wi1tj8sdbywojksuccess-wpl1ilmd20o6j4owghf9xvixinput",
+        "data": {
+          "isAnimated": false
+        }
+      },
+      {
+        "source": "k0fvkt7rbvddf5atuxda7dqg",
+        "sourceHandle": "success",
+        "target": "el3paq74364jizappu1h5omv",
+        "targetHandle": "input",
+        "type": "directed",
+        "id": "xy-edge__k0fvkt7rbvddf5atuxda7dqgsuccess-el3paq74364jizappu1h5omvinput",
+        "data": {
+          "isAnimated": false
+        }
+      },
+      {
+        "source": "k0fvkt7rbvddf5atuxda7dqg",
+        "sourceHandle": "success",
+        "target": "b1iwbwmt4lga6xminnpnxj0x",
+        "targetHandle": "input",
+        "type": "directed",
+        "id": "xy-edge__k0fvkt7rbvddf5atuxda7dqgsuccess-b1iwbwmt4lga6xminnpnxj0xinput",
+        "data": {
+          "isAnimated": false
+        }
+      },
+      {
+        "source": "b1iwbwmt4lga6xminnpnxj0x",
+        "sourceHandle": "success",
+        "target": "p4aa84dgkfqo6jh9mtr40l3j",
+        "targetHandle": "input",
+        "type": "directed",
+        "id": "xy-edge__b1iwbwmt4lga6xminnpnxj0xsuccess-p4aa84dgkfqo6jh9mtr40l3jinput",
+        "data": {
+          "isAnimated": false
+        }
+      },
+      {
+        "source": "k0fvkt7rbvddf5atuxda7dqg",
+        "sourceHandle": "success",
+        "target": "bgm168zfx7anfwkovmijfjq0",
+        "targetHandle": "input",
+        "type": "directed",
+        "id": "xy-edge__k0fvkt7rbvddf5atuxda7dqgsuccess-bgm168zfx7anfwkovmijfjq0input",
+        "data": {
+          "isAnimated": false
+        }
+      },
+      {
+        "source": "bgm168zfx7anfwkovmijfjq0",
+        "sourceHandle": "success",
+        "target": "p4aa84dgkfqo6jh9mtr40l3j",
+        "targetHandle": "input",
+        "type": "directed",
+        "id": "xy-edge__bgm168zfx7anfwkovmijfjq0success-p4aa84dgkfqo6jh9mtr40l3jinput",
+        "data": {
+          "isAnimated": false
+        }
+      },
+      {
+        "source": "smsr85ngoc1gevtefin6dyii",
+        "sourceHandle": "success",
+        "target": "p4aa84dgkfqo6jh9mtr40l3j",
+        "targetHandle": "input",
+        "type": "directed",
+        "id": "xy-edge__smsr85ngoc1gevtefin6dyiisuccess-p4aa84dgkfqo6jh9mtr40l3jinput",
+        "data": {
+          "isAnimated": false
+        }
+      },
+      {
+        "source": "k0fvkt7rbvddf5atuxda7dqg",
+        "sourceHandle": "success",
+        "target": "smsr85ngoc1gevtefin6dyii",
+        "targetHandle": "input",
+        "type": "directed",
+        "id": "xy-edge__k0fvkt7rbvddf5atuxda7dqgsuccess-smsr85ngoc1gevtefin6dyiiinput",
+        "data": {
+          "isAnimated": false
+        }
+      },
+      {
+        "source": "jm3i0j3rdg4ovt5v8468v7xp",
+        "sourceHandle": "success",
+        "target": "iy8eec0479a8tit8uxykjx24",
+        "targetHandle": "input",
+        "type": "directed",
+        "id": "xy-edge__jm3i0j3rdg4ovt5v8468v7xpsuccess-iy8eec0479a8tit8uxykjx24input",
+        "data": {
+          "isAnimated": false
+        }
+      },
+      {
+        "source": "smsr85ngoc1gevtefin6dyii",
+        "sourceHandle": "success",
+        "target": "jm3i0j3rdg4ovt5v8468v7xp",
+        "targetHandle": "input",
+        "type": "directed",
+        "id": "xy-edge__smsr85ngoc1gevtefin6dyiisuccess-jm3i0j3rdg4ovt5v8468v7xpinput",
+        "data": {
+          "isAnimated": false
+        }
+      },
+      {
+        "source": "e44khz3hod8qjohxcqe9h0qe",
+        "sourceHandle": "success",
+        "target": "a17ak2xlcte90i0zl14j6bf5",
+        "targetHandle": "input",
+        "type": "directed",
+        "id": "xy-edge__e44khz3hod8qjohxcqe9h0qesuccess-a17ak2xlcte90i0zl14j6bf5input",
+        "data": {
+          "isAnimated": false
+        }
+      },
+      {
+        "source": "a17ak2xlcte90i0zl14j6bf5",
+        "sourceHandle": "success",
+        "target": "ujr360jxlhn780aqtibiz038",
+        "targetHandle": "input",
+        "type": "directed",
+        "id": "xy-edge__a17ak2xlcte90i0zl14j6bf5success-ujr360jxlhn780aqtibiz038input",
+        "data": {
+          "isAnimated": false
+        }
+      },
+      {
+        "source": "x0ndq1ct8tsjetuoc57lajde",
+        "sourceHandle": "success",
+        "target": "kcthfvrr207w3aicumomfz7c",
+        "targetHandle": "input",
+        "type": "directed",
+        "id": "xy-edge__x0ndq1ct8tsjetuoc57lajdesuccess-kcthfvrr207w3aicumomfz7cinput",
+        "data": {
+          "isAnimated": false
+        }
+      },
+      {
+        "source": "x0ndq1ct8tsjetuoc57lajde",
+        "sourceHandle": "success",
+        "target": "fb0xo75yc9mklmgdjr587cz8",
+        "targetHandle": "input",
+        "type": "directed",
+        "id": "xy-edge__x0ndq1ct8tsjetuoc57lajdesuccess-fb0xo75yc9mklmgdjr587cz8input",
+        "data": {
+          "isAnimated": false
+        }
+      },
+      {
+        "source": "kcthfvrr207w3aicumomfz7c",
+        "sourceHandle": "success",
+        "target": "xpba4512x4iqlwk637ykkdfx",
+        "targetHandle": "input",
+        "type": "directed",
+        "id": "xy-edge__kcthfvrr207w3aicumomfz7csuccess-xpba4512x4iqlwk637ykkdfxinput",
+        "data": {
+          "isAnimated": false
+        }
+      },
+      {
+        "source": "fb0xo75yc9mklmgdjr587cz8",
+        "sourceHandle": "success",
+        "target": "gh106r9g6tdflpcss845g5w5",
+        "targetHandle": "input",
+        "type": "directed",
+        "id": "xy-edge__fb0xo75yc9mklmgdjr587cz8success-gh106r9g6tdflpcss845g5w5input",
+        "data": {
+          "isAnimated": false
+        }
+      }
+    ],
+    "status": "stopped",
+    "tracingEnabled": true,
+    "userId": "YOUR_FUSION_AI_USER_ID",
+    "version": 1,
+    "createdAt": 1786030794906,
+    "updatedAt": 1786195838067,
+    "publishedNames": [],
+    "previousStatus": "running"
+  }
+]
